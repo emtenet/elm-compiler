@@ -16,6 +16,7 @@ import qualified AST.Expression.General as E
 import qualified AST.Expression.Source as Source
 import qualified AST.Helpers as Help
 import qualified AST.Literal as L
+import qualified AST.Pattern as P
 import qualified AST.Variable as Variable
 import qualified Reporting.Annotation as A
 import qualified Reporting.Error.Syntax as Syntax
@@ -120,7 +121,8 @@ symOp =
       guard (op `notElem` [ "=", "..", "->", "--", "|", ":" ])
       case op of
         "." -> notFollowedBy lower >> return op
-        "@" -> notFollowedBy lower >> return op
+        "!" -> notFollowedBy lower >> return op
+        ".!" -> notFollowedBy lower >> return op
         _   -> return op
 
 
@@ -287,7 +289,12 @@ accessible exprParser =
 
       case access of
         Nothing ->
-          return annotatedRootExpr
+          case rootExpr of
+            E.Var _ ->
+              updater start annotatedRootExpr
+
+            _ ->
+              return annotatedRootExpr
 
         Just _ ->
           accessible $
@@ -305,7 +312,54 @@ accessible exprParser =
 dot :: IParser ()
 dot =
   do  char '.'
-      notFollowedBy (char '.')
+      notFollowedBy (oneOf ".!")
+
+
+-- model!field is shorthand for \x -> { model | field = x }
+-- model.!field is shorthand for ( model.field, \x -> { model | field = x } )
+
+updater :: R.Position -> Source.Expr -> IParser Source.Expr
+updater start model =
+  do  access <- optionMaybe (try (string "!" <|> string ".!") <?> "a setter like !name or .!name")
+
+      case access of
+        Nothing ->
+          return model
+
+        Just "!" ->
+          do  field <- rLabel <?> "a field name"
+              end <- getMyPosition
+
+              let ann value =
+                    A.at start end value
+
+              return $  (ann (E.Lambda 
+                            (ann (P.Var "x"))
+                            (ann (E.Update
+                                model
+                                [( field, (ann (E.rawVar "x")))]
+                            ))
+                        ))
+
+        Just ".!" ->
+          do  field <- rLabel <?> "a field name"
+              end <- getMyPosition
+
+              let ann value =
+                    A.at start end value
+
+              return $
+                (ann (E.tuple
+                    [ (ann (E.Access model field))
+                    , (ann (E.Lambda 
+                          (ann (P.Var "x"))
+                          (ann (E.Update
+                              model
+                              [( field, (ann (E.rawVar "x")))]
+                          ))
+                      ))
+                    ]
+                ))
 
 
 -- WHITESPACE

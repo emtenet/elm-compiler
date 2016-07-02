@@ -55,9 +55,28 @@ accessor =
             (ann (E.Access (ann (E.rawVar "_")) lbl))
 
 
-getAndSet :: IParser Source.Expr'
-getAndSet =
-  do  (start, lbl, end) <- located (try (string "@" >> rLabel))
+setter :: IParser Source.Expr'
+setter =
+  do  (start, lbl, end) <- located (try (string "!" >> rLabel))
+
+      let ann value =
+            A.at start end value
+
+      return $
+        E.Lambda 
+          (ann (P.Var "v"))
+          (ann (E.Lambda 
+              (ann (P.Var "r"))
+              (ann (E.Update
+                  (ann (E.rawVar "r")) 
+                  [( lbl, (ann (E.rawVar "v")))]
+              ))
+          ))
+
+
+accessor_and_setter :: IParser Source.Expr'
+accessor_and_setter =
+  do  (start, lbl, end) <- located (try (string ".!" >> rLabel))
 
       let ann value =
             A.at start end value
@@ -69,9 +88,9 @@ getAndSet =
                 (ann (E.Access (ann (E.rawVar "r")) lbl))
             ))
           , (ann (E.Lambda 
-                (ann (P.Var "v"))
+                (ann (P.Var "r"))
                 (ann (E.Lambda 
-                    (ann (P.Var "r"))
+                    (ann (P.Var "v"))
                     (ann (E.Update
                         (ann (E.rawVar "r")) 
                         [( lbl, (ann (E.rawVar "v")))]
@@ -193,7 +212,7 @@ recordTerm =
 
 term :: IParser Source.Expr
 term =
-  addLocation (choice [ E.Literal <$> Literal.literal, listTerm, accessor, getAndSet, negative ])
+  addLocation (choice [ E.Literal <$> Literal.literal, listTerm, accessor, setter, accessor_and_setter, negative ])
     <|> accessible (addLocation varTerm <|> parensTerm <|> recordTerm)
     <?> "a term expression"
 
